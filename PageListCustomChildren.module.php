@@ -17,7 +17,7 @@ class PageListCustomChildren extends WireData implements Module, ConfigurableMod
 	public static function getModuleInfo() {
 		return [
 			'title' => 'Page List Custom Children',
-			'version' => 1,
+			'version' => 2,
 			'summary' => 'Makes children/subpages in PageList customizable so they can appear under multiple parents.',
 			'author' => 'Ryan Cramer',
 			'icon' => 'sitemap',
@@ -305,7 +305,8 @@ class PageListCustomChildren extends WireData implements Module, ConfigurableMod
 		}
 	
 		if($match) {
-			$match['useSelectorString'] = str_replace('=page.id', "=$page->id", $match['useSelectorString']);
+			// $match['useSelectorString'] = str_replace('=page.id', "=$page->id", $match['useSelectorString']);
+			$match['useSelectorString'] = $this->updateSelectorString($page, $match['useSelectorString']); 
 		}
 		
 		$page->setQuietly('_plccMatch', $match); // cache
@@ -324,7 +325,7 @@ class PageListCustomChildren extends WireData implements Module, ConfigurableMod
 		
 		$defs = [];
 		$defTpl = [
-			'id' => 0, 
+			'id' => 0, // runtime numeric ID (it's just the index order+1)
 			'ifSelectors' => null, // if pages matches these selectors...
 			'ifTemplates' => [],  // templates extracted from ifSelectors
 			'useParents' => [], // use children from these parents
@@ -338,7 +339,7 @@ class PageListCustomChildren extends WireData implements Module, ConfigurableMod
 			
 			if(strpos($line, '>>') === false) continue;
 			
-			list($ifSelector, $useSelector) = explode('>>', $line);
+			list($ifSelector, $useSelector) = explode('>>', $line, 2);
 			
 			$ifSelector = trim($ifSelector); 
 			$useSelector = trim($useSelector); 
@@ -383,6 +384,38 @@ class PageListCustomChildren extends WireData implements Module, ConfigurableMod
 		
 		return $defs;
 	}
+
+	/**
+	 * Update dynamic "page.property" items in selector string for given page
+	 * 
+	 * @param Page $page
+	 * @param string $s
+	 * @return string
+	 * 
+	 */
+	protected function updateSelectorString(Page $page, $s) {
+		
+		if(strpos($s, '=page.') === false) return $s;
+		if(!preg_match_all('/=page\.([._a-zA-Z0-9]+)\b/', $s, $matches)) return $s;
+		
+		foreach($matches[0] as $key => $fullMatch) {
+			$property = $matches[1][$key];
+			$value = $page->get($property);
+			if($value === null) {
+				$value = '';
+			} if($value instanceof Page || $value instanceof PageArray) {
+				$value = (string) $value;
+			} else if(ctype_digit("$value")) {
+				// can use value as-is
+			} else {
+				$value = $this->wire()->sanitizer->selectorValue("$value");
+			}
+			$s = str_replace($fullMatch, "=$value", $s);
+		}
+		
+		return $s;
+	}
+		
 	
 	/**
 	 * Get plccid from input and convert it to [ definition-id, page-id ]
@@ -393,7 +426,7 @@ class PageListCustomChildren extends WireData implements Module, ConfigurableMod
 	 *
 	 */
 	public function plccid() {
-		$id = $this->wire()->input->get('plccid');
+		$id = (string) $this->wire()->input->get('plccid');
 		if(strpos($id, '.') === false) return [0,0];
 		list($matchId, $pageId) = explode('.', $id, 2);
 		$matchId = (int) $matchId;
@@ -414,7 +447,7 @@ class PageListCustomChildren extends WireData implements Module, ConfigurableMod
 		$f->label = $this->_('Children selector definitions'); 
 		$f->description = 
 			$this->_('Enter two selectors per line like `page matching selector >> find children selector`.') . ' ' . 
-			$this->_('You may use optionally `page.id` in the 2nd selector to refer to the page matched in the 1st selector.') . ' ' . 
+			$this->_('You may optionally use page.*field* (for example `page.id`), in the 2nd selector to refer to the page matched in the 1st selector.') . ' ' . 
 			$this->_('Please include a `parent=/path/to/parent` as part of the 2nd selector so this module can detect sorting and support add-page actions.') . ' ' . 
 			$this->_('Please see:') . ' ' . 
 			'[' . $this->_('More details and usage instructions') . '](https://processwire.com/blog/posts/page-list-custom-children-module/)'; 
